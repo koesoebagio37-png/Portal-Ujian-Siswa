@@ -350,9 +350,6 @@
         
         let resultListener = null;
         let examListener = null;
-        
-        // --- VARIABLE BARU: GRACE PERIOD ---
-        let isInitializing = false; 
 
         window.preventCheating = (e) => { if (e.ctrlKey || e.key === 'F12') return false; };
         
@@ -363,9 +360,6 @@
         }
 
         function updateCheatCount() {
-            // --- GRACE PERIOD CHECK ---
-            if (isInitializing) return; // ABAIKAN JIKA SEDANG LOADING AWAL
-
             const now = Date.now();
             if (now - lastCheatTime < 2000) return; // Prevent rapid fire (Double Warning Fix)
             
@@ -510,39 +504,48 @@
             showLoading(false);
         };
 
-        function shuffleArray(array) {
-            for (let i = array.length - 1; i > 0; i--) {
+        // --- FUNGSI PENGACAKAN CERDAS (SMART SHUFFLE) ---
+        // Menjaga soal dengan Group ID yang sama tetap berkumpul jadi satu blok
+        function smartShuffle(daftarSoal) {
+            const groups = new Map();
+            const singles = [];
+
+            daftarSoal.forEach(soal => {
+                // Ambil Group ID dari metadata (pastikan aman jika undefined)
+                const gid = soal.metadata && soal.metadata.groupId ? soal.metadata.groupId : null;
+                
+                if (gid) {
+                    // Jika punya Group ID, kumpulkan dalam array khusus grup tersebut
+                    if (!groups.has(gid)) {
+                        groups.set(gid, []);
+                    }
+                    groups.get(gid).push(soal);
+                } else {
+                    // Jika tidak punya grup (soal jomblo), masukkan ke singles
+                    singles.push(soal);
+                }
+            });
+
+            // Gabungkan Single + Kelompok menjadi array blok
+            // (Blok bisa berisi 1 soal single, atau array berisi banyak soal grup)
+            let blocks = [
+                ...singles,
+                ...Array.from(groups.values()) 
+            ];
+
+            // Lakukan pengacakan pada blok-blok tersebut (Fisher-Yates Shuffle)
+            for (let i = blocks.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
-                [array[i], array[j]] = [array[j], array[i]];
+                [blocks[i], blocks[j]] = [blocks[j], blocks[i]];
             }
-            return array;
+
+            // Ratakan kembali (Flatten) menjadi satu daftar soal panjang
+            return blocks.flat();
         }
 
         window.startExam = async () => {
             const code = document.getElementById('input-kode').value.trim().toUpperCase();
             if(!code) return alert('Kode Salah!');
-
-            // --- FIX: BERSIHKAN DATA SAMPAH & CEGAH HITUNGAN GANDA ---
-            const keysToRemove = [];
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                // Hapus data cheat/timer lama yang tidak sesuai kode ujian saat ini
-                if ((key.startsWith('cheat_') || key.startsWith('end_time_') || key.startsWith('exam_')) && !key.includes(code)) {
-                    keysToRemove.push(key);
-                }
-                // Hapus spesifik cheat count ujian ini juga agar mulai dari 0 (mengandalkan server)
-                if (key.startsWith('cheat_')) {
-                    keysToRemove.push(key);
-                }
-            }
-            keysToRemove.forEach(k => localStorage.removeItem(k));
-            
-            // Reset state
-            cheatCount = 0; 
-            lastCheatTime = Date.now();
-            isInitializing = true; // AKTIFKAN MODE KEBAL
-            setTimeout(() => { isInitializing = false; }, 5000); // 5 DETIK KEBAL
-            // ---------------------------------------------------------
             
             // [iPhone Fix] Coba fullscreen dengan aman (tidak error jika tidak support)
             try { 
@@ -639,7 +642,9 @@
                     }
                 } else {
                     finalQuestions = [...questions];
-                    if(examData.settingAcakSoal) shuffleArray(finalQuestions);
+                    if(examData.settingAcakSoal) {
+                        finalQuestions = smartShuffle(finalQuestions);
+                    }
                     const newOrder = finalQuestions.map(q => q.id);
                     localStorage.setItem(orderKey, JSON.stringify(newOrder));
                 }
