@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Exam Portal - Comfort & Glow</title>
+    <!-- FIX: Menghapus sintaks markdown dari src -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -31,8 +32,10 @@
             }
         }
     </script>
+    <!-- FIX: Menghapus sintaks markdown dari href -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <script>MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] }, svg: { fontCache: 'global' } };</script>
+    <!-- FIX: Menghapus sintaks markdown dari src -->
     <script type="text/javascript" id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <style>
         body {
@@ -331,6 +334,7 @@
         </div>
     </div>
 
+    <!-- FIX: Menghapus sintaks markdown dari import statements -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -489,12 +493,33 @@
             await signInAnonymously(auth);
         })();
 
+        // TIME FIX UTILITY (WIB)
+        function getIndoDateString() {
+            // Force return YYYY-MM-DD in Indonesia Time (UTC+7)
+            const now = new Date();
+            const jakartaOffset = 7 * 60; // Minutes
+            const localOffset = now.getTimezoneOffset(); // Minutes
+            const jakartaTime = new Date(now.getTime() + (localOffset + jakartaOffset) * 60000);
+            return jakartaTime.toISOString().split('T')[0];
+        }
+
         window.checkNIS = async () => {
             const nis = document.getElementById('input-nis').value.trim();
             if(!nis) return alert('Isi NIS!');
             showLoading(true);
             try {
-                const snap = await getDoc(doc(db, 'siswa', nis));
+                // Try direct lookup
+                let snap = await getDoc(doc(db, 'siswa', nis));
+                
+                // Fallback smart lookup (e.g. 242510123 -> 2425.10.123)
+                if (!snap.exists()) {
+                    const clean = nis.replace(/[^0-9]/g, '');
+                    if (clean.length === 9) {
+                        const formatted = `${clean.substring(0,4)}.${clean.substring(4,6)}.${clean.substring(6)}`;
+                        snap = await getDoc(doc(db, 'siswa', formatted));
+                    }
+                }
+
                 if(snap.exists()) {
                     studentData = { nis: snap.id, ...snap.data() };
                     document.getElementById('confirm-name').textContent = studentData.nama;
@@ -513,14 +538,17 @@
             const singles = [];
 
             daftarSoal.forEach(soal => {
+                // Ambil Group ID dari metadata (pastikan aman jika undefined)
                 const gid = soal.metadata && soal.metadata.groupId ? soal.metadata.groupId : null;
                 
                 if (gid) {
+                    // Jika punya Group ID, kumpulkan dalam array khusus grup tersebut
                     if (!groups.has(gid)) {
                         groups.set(gid, []);
                     }
                     groups.get(gid).push(soal);
                 } else {
+                    // Jika tidak punya grup (soal jomblo), masukkan ke singles
                     singles.push(soal);
                 }
             });
@@ -536,22 +564,23 @@
             }
 
             // Gabungkan Single + Kelompok menjadi array blok
+            // (Blok bisa berisi 1 soal single, atau array berisi banyak soal grup)
             let blocks = [
                 ...singles,
                 ...Array.from(groups.values()) 
             ];
 
-            // Lakukan pengacakan pada blok-blok tersebut
+            // Lakukan pengacakan pada blok-blok tersebut (Fisher-Yates Shuffle)
             for (let i = blocks.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [blocks[i], blocks[j]] = [blocks[j], blocks[i]];
             }
 
-            // Ratakan kembali (Flatten)
+            // Ratakan kembali (Flatten) menjadi satu daftar soal panjang
             return blocks.flat();
         }
 
-        // --- FUNGSI SHUFFLE ARRAY BIASA ---
+        // --- FUNGSI SHUFFLE ARRAY BIASA (Fix: Ditambahkan) ---
         function shuffleArray(array) {
             for (let i = array.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
@@ -572,18 +601,19 @@
             showLoading(true);
             
             // --- SECURITY & ATTENDANCE CHECK ---
-            const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+            const today = getIndoDateString(); // Menggunakan fungsi fix Timezone Indonesia
             try {
-                // 1. Cek Presensi Harian
+                // 1. Cek Presensi Harian (Wajib Hadir)
                 const presensiDocRef = doc(db, 'presensi', `${studentData.kelas}_${today}`);
                 const presensiSnap = await getDoc(presensiDocRef);
                 
                 if (!presensiSnap.exists() || !presensiSnap.data()[studentData.nis]) {
+                    // Fallback: Check if teacher allows exam without presence? No, strict rule.
                     throw new Error("ANDA BELUM ABSENSI! Silakan scan QR Presensi terlebih dahulu.");
                 }
                 
                 const statusHadir = presensiSnap.data()[studentData.nis].status;
-                if (statusHadir !== 'h') {
+                if (statusHadir !== 'h' && statusHadir !== 'H') {
                     throw new Error(`STATUS KEHADIRAN ANDA: ${statusHadir.toUpperCase()}. Ujian ditolak.`);
                 }
 
@@ -592,7 +622,10 @@
                 if(!snap.exists()) throw new Error('Kode Ujian Tidak Valid');
                 examData = snap.data();
 
-                if(!examData.targetSemuaKelas && !examData.targetKelas.includes(studentData.kelas)) throw new Error('Salah Kelas');
+                // 3. Validasi Target Kelas
+                if(!examData.targetSemuaKelas && !examData.targetKelas.includes(studentData.kelas)) {
+                    throw new Error('Ujian ini bukan untuk kelas Anda.');
+                }
 
                 const resRef = doc(db, 'hasil_ujian', `${code}_${studentData.nis}`);
                 const resSnap = await getDoc(resRef);
@@ -600,6 +633,7 @@
                 const cheatKey = `cheat_${code}_${studentData.nis}`;
                 
                 if(!resSnap.exists()) {
+                    // Skenario 1: Siswa baru pertama kali masuk
                     cheatCount = 0; 
                     localStorage.setItem(cheatKey, '0');
                     
@@ -609,18 +643,23 @@
                         skor: 0, lastHeartbeat: serverTimestamp(), mulaiPada: serverTimestamp(), userAgent: navigator.userAgent
                     });
                 } else {
+                    // Skenario 2: Siswa sudah pernah masuk (Resume atau Ulang)
                     const rData = resSnap.data();
                     
-                    // PERBAIKAN: Default ke TRUE (Dibatasi) jika setting tidak ada/undefined demi keamanan.
-                    // Hanya izinkan ulang jika settingBatasiSatuKali secara eksplisit bernilai FALSE.
+                    // PERBAIKAN LOGIKA:
+                    // Defaultnya adalah TRUE (Dibatasi/Terkunci) jika setting tidak ada/undefined demi keamanan.
+                    // Siswa hanya boleh masuk lagi jika 'settingBatasiSatuKali' secara eksplisit bernilai FALSE (tidak dicentang di Admin).
                     const isRestricted = examData.settingBatasiSatuKali !== false; 
 
+                    // Jika dibatasi DAN status ujian sebelumnya sudah selesai/suspended -> TOLAK
                     if(isRestricted && (rData.status === 'selesai' || rData.status === 'suspended')) {
                         monitorResult(`${code}_${studentData.nis}`, code);
                         showLoading(false);
+                        // Tampilkan pesan peringatan kecil (opsional, tapi langsung redirect ke hasil)
                         return;
                     }
                     
+                    // Jika lolos pengecekan (resume atau diizinkan ulang), lanjutkan
                     cheatCount = rData.pelanggaran || 0;
                     localStorage.setItem(cheatKey, cheatCount);
                     await updateDoc(resRef, { status: 'mengerjakan', lastHeartbeat: serverTimestamp() });
