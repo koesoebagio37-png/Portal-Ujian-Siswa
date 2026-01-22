@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Exam Portal - Comfort & Glow</title>
-    <!-- FIX: Menghapus sintaks markdown dari src -->
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -32,10 +32,9 @@
             }
         }
     </script>
-    <!-- FIX: Menghapus sintaks markdown dari href -->
+    
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <script>MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] }, svg: { fontCache: 'global' } };</script>
-    <!-- FIX: Menghapus sintaks markdown dari src -->
     <script type="text/javascript" id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <style>
         body {
@@ -72,7 +71,7 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: #64748b; }
-        .soal-text { font-size: 1.125rem; line-height: 1.8; color: #f1f5f9; font-weight: 400; }
+        .soal-text { font-size: 1.125rem; line-height: 1.8; color: #f1f5f9; font-weight: 400; transition: font-size 0.2s ease; }
         .soal-text img { max-width: 100%; border-radius: 12px; margin: 1.5rem auto; border: 1px solid #334155; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
         .nav-grid-btn {
             background: rgba(255,255,255,0.03);
@@ -84,6 +83,11 @@
         .nav-grid-btn.active { background: #38bdf8; border-color: #38bdf8; color: #0f172a; font-weight: 800; box-shadow: 0 0 20px rgba(56, 189, 248, 0.4); transform: scale(1.1); }
         .nav-grid-btn.done { border-color: #34d399; color: #34d399; background: rgba(52, 211, 153, 0.1); }
         .nav-grid-btn.flag { border-color: #fbbf24; color: #fbbf24; background: rgba(251, 191, 36, 0.1); }
+        
+        /* Font size utility classes applied by JS */
+        .text-zoom-sm { font-size: 0.875rem !important; }
+        .text-zoom-md { font-size: 1.125rem !important; }
+        .text-zoom-lg { font-size: 1.5rem !important; line-height: 2rem !important; }
     </style>
 </head>
 <body class="flex flex-col min-h-screen font-sans" oncontextmenu="return false;" onkeydown="return preventCheating(event)">
@@ -205,7 +209,13 @@
                     <p id="header-student-name" class="text-[10px] md:text-xs text-primary font-mono uppercase tracking-wider">SISWA</p>
                 </div>
             </div>
-            <div class="flex items-center gap-6">
+            <div class="flex items-center gap-4">
+                <!-- FONT SIZE CONTROLS (ZOOM) -->
+                <div class="flex items-center gap-1 bg-slate-800/50 rounded-lg p-1 border border-white/5 mr-2">
+                    <button onclick="resizeFont(-10)" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 rounded transition-colors text-xs font-bold" title="Kecilkan Teks">A-</button>
+                    <button onclick="resizeFont(10)" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 rounded transition-colors text-lg font-bold" title="Besarkan Teks">A+</button>
+                </div>
+
                 <div class="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-success/10 border border-success/20 text-success text-[10px] font-bold tracking-wider">
                     <span class="w-2 h-2 rounded-full bg-success animate-pulse"></span> ONLINE
                 </div>
@@ -234,9 +244,9 @@
                 </label>
             </div>
 
-            <div class="flex-1 overflow-y-auto custom-scrollbar pr-2">
+            <div class="flex-1 overflow-y-auto custom-scrollbar pr-2" id="exam-content-area">
                 <div id="q-content" class="soal-text mb-8"></div>
-                <div id="q-options" class="space-y-3 pb-4"></div>
+                <div id="q-options" class="space-y-3 pb-4 soal-text"></div>
             </div>
 
             <div class="mt-6 pt-6 border-t border-white/5 flex justify-between items-center">
@@ -353,11 +363,26 @@
         let isSubmitting = false;
         window.isUploading = false;
         let lastCheatTime = 0; // Debounce Timer
+        let currentFontSize = 100; // Persentase Zoom Font
         
         let resultListener = null;
         let examListener = null;
 
         window.preventCheating = (e) => { if (e.ctrlKey || e.key === 'F12') return false; };
+
+        // --- FONT SIZE CONTROL (ZOOM) ---
+        window.resizeFont = (delta) => {
+            currentFontSize += delta;
+            // Batasi antara 80% sampai 160%
+            if(currentFontSize < 80) currentFontSize = 80;
+            if(currentFontSize > 160) currentFontSize = 160;
+            
+            const qContent = document.getElementById('q-content');
+            const qOptions = document.getElementById('q-options');
+            
+            if(qContent) qContent.style.fontSize = `${currentFontSize}%`;
+            if(qOptions) qOptions.style.fontSize = `${currentFontSize}%`;
+        };
         
         // --- SECURITY SYSTEM ---
         function getCheatLimit() {
@@ -430,7 +455,9 @@
             const isFull = document.fullscreenElement || document.webkitFullscreenElement;
 
             if (isSupported && !isFull) {
-                updateCheatCount();
+                // FIX: Tidak update cheat count di sini untuk mencegah double counting
+                // updateCheatCount(); 
+                
                 const limit = getCheatLimit();
                 if (cheatCount <= limit) {
                     blocker.style.display = 'flex';
@@ -765,15 +792,20 @@
             document.getElementById('q-number').textContent = idx + 1;
             document.getElementById('q-type-badge').textContent = q.type.toUpperCase();
             
+            // Set Font Size on Load
+            const containerQ = document.getElementById('q-content');
+            const containerO = document.getElementById('q-options');
+            containerQ.style.fontSize = `${currentFontSize}%`;
+            containerO.style.fontSize = `${currentFontSize}%`;
+
             let html = '';
             if(q.audio) html += `<audio controls src="${q.audio}" class="w-full mb-4"></audio>`;
-            html += `<div class="soal-text">${q.naskah}</div>`;
+            html += `<div class="soal-text" style="font-size: 100%">${q.naskah}</div>`;
             if(q.naskahImage) html += `<img src="${q.naskahImage}" class="mt-2 rounded border">`;
-            if(q.naskahBawah) html += `<div class="soal-text mt-2">${q.naskahBawah}</div>`;
+            if(q.naskahBawah) html += `<div class="soal-text mt-2" style="font-size: 100%">${q.naskahBawah}</div>`;
 
-            document.getElementById('q-content').innerHTML = html;
-            const container = document.getElementById('q-options');
-            container.innerHTML = '';
+            containerQ.innerHTML = html;
+            containerO.innerHTML = '';
             
             const ans = answers[idx];
             const savedVal = ans.val;
@@ -785,16 +817,17 @@
                     div.className = `flex items-center gap-4 p-4 border rounded-2xl cursor-pointer transition-all duration-200 group ${isSel ? 'border-primary bg-primary/10 shadow-[0_0_15px_rgba(56,189,248,0.2)]' : 'border-slate-700 bg-slate-800/30 hover:bg-slate-800 hover:border-slate-500'}`;
                     div.onclick = () => saveAns(o.originalIndex);
                     div.innerHTML = `<div class="w-10 h-10 rounded-xl border flex items-center justify-center font-bold text-sm transition-colors ${isSel ? 'bg-primary text-slate-900 border-primary' : 'bg-slate-800 border-slate-600 text-slate-400 group-hover:text-white'}">${String.fromCharCode(65+i)}</div><div class="flex-1 text-slate-300 font-medium leading-relaxed group-hover:text-white transition-colors">${o.text}${o.imageBase64 ? `<br><img src="${o.imageBase64}" class="mt-2 h-24 rounded-lg border border-white/10">` : ''}</div>`;
-                    container.appendChild(div);
+                    containerO.appendChild(div);
                 });
             } else if(q.type === 'bs') {
-                let t = `<div class="border border-slate-700 rounded-2xl overflow-hidden"><table class="w-full text-sm"><thead class="bg-slate-800 text-slate-300 font-bold border-b border-slate-700"><tr><th class="p-4 text-left">Pernyataan</th><th class="p-4 w-16 text-center">B</th><th class="p-4 w-16 text-center">S</th></tr></thead><tbody class="divide-y divide-slate-700">`;
+                // FIX: Menambahkan overflow-x-auto agar tabel bisa digeser
+                let t = `<div class="border border-slate-700 rounded-2xl overflow-x-auto"><table class="w-full text-sm min-w-[400px]"><thead class="bg-slate-800 text-slate-300 font-bold border-b border-slate-700"><tr><th class="p-4 text-left">Pernyataan</th><th class="p-4 w-16 text-center">B</th><th class="p-4 w-16 text-center">S</th></tr></thead><tbody class="divide-y divide-slate-700">`;
                 q.opsi.forEach((o, i) => {
                     const tIdx = o.originalIndex !== undefined ? o.originalIndex : i;
                     const val = savedVal ? savedVal[tIdx] : null;
                     t += `<tr class="hover:bg-slate-800/50 transition-colors"><td class="p-4 text-slate-300">${o.text}</td><td class="p-4 text-center"><input type="radio" name="bs_${i}" class="w-5 h-5 accent-emerald-500" ${val==='true'?'checked':''} onchange="saveBsAns(${tIdx}, 'true')"></td><td class="p-4 text-center"><input type="radio" name="bs_${i}" class="w-5 h-5 accent-red-500" ${val==='false'?'checked':''} onchange="saveBsAns(${tIdx}, 'false')"></td></tr>`;
                 });
-                container.innerHTML = t + `</tbody></table></div>`;
+                containerO.innerHTML = t + `</tbody></table></div>`;
             } else if(q.type === 'pgk') {
                 const sel = Array.isArray(savedVal) ? savedVal : [];
                 q.opsi.forEach((o, i) => {
@@ -806,7 +839,7 @@
                         let n = [...sel]; if(n.includes(tIdx)) n = n.filter(x=>x!==tIdx); else n.push(tIdx); saveAns(n);
                     };
                     div.innerHTML = `<div class="w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all ${isSel ? 'bg-primary border-primary' : 'border-slate-500'}">${isSel ? '<svg class="w-4 h-4 text-slate-900" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg>' : ''}</div><div class="flex-1 text-slate-300 font-medium">${o.text}</div>`;
-                    container.appendChild(div);
+                    containerO.appendChild(div);
                 });
             } else {
                 const ta = document.createElement('textarea');
@@ -814,7 +847,7 @@
                 ta.placeholder = "Ketik jawaban...";
                 ta.value = savedVal || '';
                 ta.oninput = (e) => saveAns(e.target.value);
-                container.appendChild(ta);
+                containerO.appendChild(ta);
 
                 if(q.type === 'esai-kompleks') {
                     const camDiv = document.createElement('div');
@@ -822,7 +855,7 @@
                     const uid = `cam-${idx}`;
                     camDiv.innerHTML = `<label for="${uid}" class="cursor-pointer px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-white text-sm font-bold flex items-center gap-2 w-max transition-all shadow-lg" onclick="window.isUploading=true"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path></svg> Foto Jawaban</label><input type="file" id="${uid}" accept="image/*" class="hidden" capture="environment">
                     <div id="preview-${idx}" class="${ans.image ? 'mt-4' : 'mt-4 hidden'}">${ans.image ? `<div class="relative inline-block group"><img src="${ans.image}" class="h-40 rounded-xl border border-white/20 shadow-lg"><button onclick="delImg(${idx})" class="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1.5 shadow-md"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>` : ''}</div>`;
-                    container.appendChild(camDiv);
+                    containerO.appendChild(camDiv);
                     setTimeout(() => {
                         const fi = document.getElementById(uid);
                         if(fi) fi.onchange = async (e) => {
@@ -839,7 +872,7 @@
                 }
             }
 
-            if(window.MathJax) MathJax.typesetPromise([document.getElementById('q-content'), container]);
+            if(window.MathJax) MathJax.typesetPromise([document.getElementById('q-content'), containerO]);
             
             document.getElementById('btn-prev').disabled = idx === 0;
             if(idx === questions.length - 1) {
@@ -1014,8 +1047,13 @@
             });
             examListener = onSnapshot(doc(db, 'ujian_terjadwal', eid), s => {
                 if(s.exists()) {
-                    if(s.data().settingTampilNilai) { waitBox.classList.add('hidden'); scoreBox.classList.remove('hidden'); }
-                    else { scoreBox.classList.add('hidden'); waitBox.classList.remove('hidden'); }
+                    if(s.data().settingTampilNilai) { 
+                        waitBox.classList.add('hidden'); 
+                        scoreBox.classList.remove('hidden'); 
+                    } else { 
+                        scoreBox.classList.add('hidden'); 
+                        waitBox.classList.remove('hidden'); 
+                    }
                 }
             });
         }
@@ -1028,3 +1066,4 @@
     </script>
 </body>
 </html>
+
