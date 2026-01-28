@@ -455,9 +455,7 @@
             const isFull = document.fullscreenElement || document.webkitFullscreenElement;
 
             if (isSupported && !isFull) {
-                // FIX: Tidak update cheat count di sini untuk mencegah double counting
-                // updateCheatCount(); 
-                
+                updateCheatCount();
                 const limit = getCheatLimit();
                 if (cheatCount <= limit) {
                     blocker.style.display = 'flex';
@@ -520,14 +518,17 @@
             await signInAnonymously(auth);
         })();
 
-        // TIME FIX UTILITY (WIB)
+        // TIME FIX UTILITY (WIB FORCE)
         function getIndoDateString() {
-            // Force return YYYY-MM-DD in Indonesia Time (UTC+7)
+            // FIX: Gunakan Absolute Timestamp UTC + 7 Jam untuk memaksa WIB
+            // Ini menghindari bug browser yang menganggap "06.55 WIB" sebagai "Kemarin" (di UTC)
             const now = new Date();
-            const jakartaOffset = 7 * 60; // Minutes
-            const localOffset = now.getTimezoneOffset(); // Minutes
-            const jakartaTime = new Date(now.getTime() + (localOffset + jakartaOffset) * 60000);
-            return jakartaTime.toISOString().split('T')[0];
+            const utcMs = now.getTime(); // Absolute UTC timestamp
+            const wibOffset = 7 * 60 * 60 * 1000; // +7 Jam (WIB)
+            const wibDate = new Date(utcMs + wibOffset); 
+            // toISOString() selalu print UTC. Karena kita sudah geser jamnya seolah-olah UTC adalah WIB,
+            // maka string yang keluar adalah tanggal WIB yang benar.
+            return wibDate.toISOString().split('T')[0];
         }
 
         window.checkNIS = async () => {
@@ -629,25 +630,40 @@
             
             // --- SECURITY & ATTENDANCE CHECK ---
             const today = getIndoDateString(); // Menggunakan fungsi fix Timezone Indonesia
+            
             try {
-                // 1. Cek Presensi Harian (Wajib Hadir)
-                const presensiDocRef = doc(db, 'presensi', `${studentData.kelas}_${today}`);
-                const presensiSnap = await getDoc(presensiDocRef);
+                // STEP 1: LOAD EXAM DATA FIRST (Changed Order)
+                // Kita harus tahu Mapel apa ujian ini untuk mengecek presensi di laci yang benar
+                const snap = await getDoc(doc(db, 'ujian_terjadwal', code));
+                if(!snap.exists()) throw new Error('Kode Ujian Tidak Valid');
+                examData = snap.data();
+
+                // STEP 2: CHECK ATTENDANCE WITH MAPEL CONTEXT
+                // Strategi: Cek Laci Mapel dulu (Sistem Baru). Jika kosong/tidak ketemu, cek Laci Umum (Fallback).
+                let presensiSnap = null;
+                let usedMapel = examData.mapel; // Pastikan data ujian punya field 'mapel'
+
+                // Cek Laci Spesifik Mapel (Format Baru)
+                if (usedMapel) {
+                    const specificId = `${studentData.kelas}_${usedMapel}_${today}`;
+                    presensiSnap = await getDoc(doc(db, 'presensi', specificId));
+                }
+
+                // Fallback: Cek Laci Umum (Format Lama/Backup) jika yang spesifik tidak ada
+                if (!presensiSnap || !presensiSnap.exists()) {
+                    const generalId = `${studentData.kelas}_${today}`;
+                    presensiSnap = await getDoc(doc(db, 'presensi', generalId));
+                }
                 
-                if (!presensiSnap.exists() || !presensiSnap.data()[studentData.nis]) {
-                    // Fallback: Check if teacher allows exam without presence? No, strict rule.
-                    throw new Error("ANDA BELUM ABSENSI! Silakan scan QR Presensi terlebih dahulu.");
+                // Validasi Status Kehadiran
+                if (!presensiSnap.exists() || !presensiSnap.data() || !presensiSnap.data()[studentData.nis]) {
+                    throw new Error(`ANDA BELUM ABSENSI untuk Mapel: ${usedMapel || 'Umum'}. Silakan scan QR Presensi Guru terlebih dahulu.`);
                 }
                 
                 const statusHadir = presensiSnap.data()[studentData.nis].status;
                 if (statusHadir !== 'h' && statusHadir !== 'H') {
                     throw new Error(`STATUS KEHADIRAN ANDA: ${statusHadir.toUpperCase()}. Ujian ditolak.`);
                 }
-
-                // 2. Load Ujian
-                const snap = await getDoc(doc(db, 'ujian_terjadwal', code));
-                if(!snap.exists()) throw new Error('Kode Ujian Tidak Valid');
-                examData = snap.data();
 
                 // 3. Validasi Target Kelas
                 if(!examData.targetSemuaKelas && !examData.targetKelas.includes(studentData.kelas)) {
@@ -1066,4 +1082,3 @@
     </script>
 </body>
 </html>
-
