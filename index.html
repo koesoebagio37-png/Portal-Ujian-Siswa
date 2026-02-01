@@ -368,6 +368,13 @@
         let resultListener = null;
         let examListener = null;
 
+        // --- TITLE CASE HELPER ---
+        function toTitleCase(str) {
+            return str.replace(/\w\S*/g, function(txt){
+                return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();
+            });
+        }
+
         window.preventCheating = (e) => { if (e.ctrlKey || e.key === 'F12') return false; };
 
         // --- FONT SIZE CONTROL (ZOOM) ---
@@ -632,8 +639,7 @@
             const today = getIndoDateString(); // Menggunakan fungsi fix Timezone Indonesia
             
             try {
-                // STEP 1: LOAD EXAM DATA FIRST (Changed Order)
-                // Kita harus tahu Mapel apa ujian ini untuk mengecek presensi di laci yang benar
+                // STEP 1: LOAD EXAM DATA FIRST
                 const snap = await getDoc(doc(db, 'ujian_terjadwal', code));
                 if(!snap.exists()) throw new Error('Kode Ujian Tidak Valid');
                 examData = snap.data();
@@ -641,9 +647,11 @@
                 // STEP 2: CHECK ATTENDANCE WITH MAPEL CONTEXT
                 // Strategi: Cek Laci Mapel dulu (Sistem Baru). Jika kosong/tidak ketemu, cek Laci Umum (Fallback).
                 let presensiSnap = null;
-                let usedMapel = examData.mapel; // Pastikan data ujian punya field 'mapel'
+                // FIX: Force TitleCase for mapel to ensure match with new Attendance System (which uses TitleCase)
+                let usedMapel = examData.mapel; 
+                if (usedMapel) usedMapel = toTitleCase(usedMapel);
 
-                // Cek Laci Spesifik Mapel (Format Baru)
+                // Cek Laci Spesifik Mapel (Format Baru - Title Case)
                 if (usedMapel) {
                     const specificId = `${studentData.kelas}_${usedMapel}_${today}`;
                     presensiSnap = await getDoc(doc(db, 'presensi', specificId));
@@ -690,15 +698,12 @@
                     const rData = resSnap.data();
                     
                     // PERBAIKAN LOGIKA:
-                    // Defaultnya adalah TRUE (Dibatasi/Terkunci) jika setting tidak ada/undefined demi keamanan.
-                    // Siswa hanya boleh masuk lagi jika 'settingBatasiSatuKali' secara eksplisit bernilai FALSE (tidak dicentang di Admin).
                     const isRestricted = examData.settingBatasiSatuKali !== false; 
 
                     // Jika dibatasi DAN status ujian sebelumnya sudah selesai/suspended -> TOLAK
                     if(isRestricted && (rData.status === 'selesai' || rData.status === 'suspended')) {
                         monitorResult(`${code}_${studentData.nis}`, code);
                         showLoading(false);
-                        // Tampilkan pesan peringatan kecil (opsional, tapi langsung redirect ke hasil)
                         return;
                     }
                     
