@@ -367,6 +367,8 @@
         
         let resultListener = null;
         let examListener = null;
+        let statusListener = null; // NEW: Listener status real-time
+        let heartbeatInterval = null; // NEW: Interval detak jantung aman
 
         // --- TITLE CASE HELPER ---
         function toTitleCase(str) {
@@ -528,13 +530,10 @@
         // TIME FIX UTILITY (WIB FORCE)
         function getIndoDateString() {
             // FIX: Gunakan Absolute Timestamp UTC + 7 Jam untuk memaksa WIB
-            // Ini menghindari bug browser yang menganggap "06.55 WIB" sebagai "Kemarin" (di UTC)
             const now = new Date();
             const utcMs = now.getTime(); // Absolute UTC timestamp
             const wibOffset = 7 * 60 * 60 * 1000; // +7 Jam (WIB)
             const wibDate = new Date(utcMs + wibOffset); 
-            // toISOString() selalu print UTC. Karena kita sudah geser jamnya seolah-olah UTC adalah WIB,
-            // maka string yang keluar adalah tanggal WIB yang benar.
             return wibDate.toISOString().split('T')[0];
         }
 
@@ -567,29 +566,20 @@
         };
 
         // --- FUNGSI PENGACAKAN CERDAS (SMART SHUFFLE) ---
-        // Menjaga soal dengan Group ID yang sama tetap berkumpul jadi satu blok
         function smartShuffle(daftarSoal) {
             const groups = new Map();
             const singles = [];
 
             daftarSoal.forEach(soal => {
-                // Ambil Group ID dari metadata (pastikan aman jika undefined)
                 const gid = soal.metadata && soal.metadata.groupId ? soal.metadata.groupId : null;
-                
                 if (gid) {
-                    // Jika punya Group ID, kumpulkan dalam array khusus grup tersebut
-                    if (!groups.has(gid)) {
-                        groups.set(gid, []);
-                    }
+                    if (!groups.has(gid)) groups.set(gid, []);
                     groups.get(gid).push(soal);
                 } else {
-                    // Jika tidak punya grup (soal jomblo), masukkan ke singles
                     singles.push(soal);
                 }
             });
 
-            // --- LOGIKA PENGURUTAN INTERNAL GRUP ---
-            // Otomatis menaruh soal dengan naskah TERPANJANG di paling atas (Asumsi: Wacana)
             for (let [gid, groupList] of groups) {
                 groupList.sort((a, b) => {
                     const lenA = (a.naskah || "").length;
@@ -598,24 +588,15 @@
                 });
             }
 
-            // Gabungkan Single + Kelompok menjadi array blok
-            // (Blok bisa berisi 1 soal single, atau array berisi banyak soal grup)
-            let blocks = [
-                ...singles,
-                ...Array.from(groups.values()) 
-            ];
+            let blocks = [ ...singles, ...Array.from(groups.values()) ];
 
-            // Lakukan pengacakan pada blok-blok tersebut (Fisher-Yates Shuffle)
             for (let i = blocks.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [blocks[i], blocks[j]] = [blocks[j], blocks[i]];
             }
-
-            // Ratakan kembali (Flatten) menjadi satu daftar soal panjang
             return blocks.flat();
         }
 
-        // --- FUNGSI SHUFFLE ARRAY BIASA (Fix: Ditambahkan) ---
         function shuffleArray(array) {
             for (let i = array.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
@@ -627,7 +608,6 @@
             const code = document.getElementById('input-kode').value.trim().toUpperCase();
             if(!code) return alert('Kode Salah!');
             
-            // [iPhone Fix] Coba fullscreen dengan aman (tidak error jika tidak support)
             try { 
                 if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
                 else if (document.documentElement.webkitRequestFullscreen) await document.documentElement.webkitRequestFullscreen();
@@ -635,35 +615,28 @@
             
             showLoading(true);
             
-            // --- SECURITY & ATTENDANCE CHECK ---
-            const today = getIndoDateString(); // Menggunakan fungsi fix Timezone Indonesia
+            const today = getIndoDateString(); 
             
             try {
-                // STEP 1: LOAD EXAM DATA FIRST
+                // STEP 1: LOAD EXAM DATA
                 const snap = await getDoc(doc(db, 'ujian_terjadwal', code));
                 if(!snap.exists()) throw new Error('Kode Ujian Tidak Valid');
                 examData = snap.data();
 
-                // STEP 2: CHECK ATTENDANCE WITH MAPEL CONTEXT
-                // Strategi: Cek Laci Mapel dulu (Sistem Baru). Jika kosong/tidak ketemu, cek Laci Umum (Fallback).
+                // STEP 2: CHECK ATTENDANCE
                 let presensiSnap = null;
-                // FIX: Force TitleCase for mapel to ensure match with new Attendance System (which uses TitleCase)
                 let usedMapel = examData.mapel; 
                 if (usedMapel) usedMapel = toTitleCase(usedMapel);
 
-                // Cek Laci Spesifik Mapel (Format Baru - Title Case)
                 if (usedMapel) {
                     const specificId = `${studentData.kelas}_${usedMapel}_${today}`;
                     presensiSnap = await getDoc(doc(db, 'presensi', specificId));
                 }
-
-                // Fallback: Cek Laci Umum (Format Lama/Backup) jika yang spesifik tidak ada
                 if (!presensiSnap || !presensiSnap.exists()) {
                     const generalId = `${studentData.kelas}_${today}`;
                     presensiSnap = await getDoc(doc(db, 'presensi', generalId));
                 }
                 
-                // Validasi Status Kehadiran
                 if (!presensiSnap.exists() || !presensiSnap.data() || !presensiSnap.data()[studentData.nis]) {
                     throw new Error(`ANDA BELUM ABSENSI untuk Mapel: ${usedMapel || 'Umum'}. Silakan scan QR Presensi Guru terlebih dahulu.`);
                 }
@@ -684,30 +657,23 @@
                 const cheatKey = `cheat_${code}_${studentData.nis}`;
                 
                 if(!resSnap.exists()) {
-                    // Skenario 1: Siswa baru pertama kali masuk
                     cheatCount = 0; 
                     localStorage.setItem(cheatKey, '0');
-                    
                     await setDoc(resRef, {
                         nis: studentData.nis, nama: studentData.nama, kelas: studentData.kelas,
                         ujianId: examData.kodeUjian, status: 'mengerjakan', pelanggaran: 0,
                         skor: 0, lastHeartbeat: serverTimestamp(), mulaiPada: serverTimestamp(), userAgent: navigator.userAgent
                     });
                 } else {
-                    // Skenario 2: Siswa sudah pernah masuk (Resume atau Ulang)
                     const rData = resSnap.data();
-                    
-                    // PERBAIKAN LOGIKA:
                     const isRestricted = examData.settingBatasiSatuKali !== false; 
 
-                    // Jika dibatasi DAN status ujian sebelumnya sudah selesai/suspended -> TOLAK
                     if(isRestricted && (rData.status === 'selesai' || rData.status === 'suspended')) {
                         monitorResult(`${code}_${studentData.nis}`, code);
                         showLoading(false);
                         return;
                     }
                     
-                    // Jika lolos pengecekan (resume atau diizinkan ulang), lanjutkan
                     cheatCount = rData.pelanggaran || 0;
                     localStorage.setItem(cheatKey, cheatCount);
                     await updateDoc(resRef, { status: 'mengerjakan', lastHeartbeat: serverTimestamp() });
@@ -782,6 +748,10 @@
                 document.getElementById('exam-header').classList.remove('hidden');
                 document.getElementById('exam-header').classList.add('flex');
                 
+                // --- NEW: START REAL-TIME LISTENER & HEARTBEAT (FIX) ---
+                startStatusListener(resRef);
+                startHeartbeat(resRef);
+
                 renderNav();
                 loadQuestion(0);
                 startSyncTimer();
@@ -790,6 +760,60 @@
             } catch(e) { alert(e.message); }
             showLoading(false);
         };
+
+        // --- NEW: FUNCTIONS FOR LIVE MONITORING FIX ---
+        
+        function startStatusListener(docRef) {
+            if (statusListener) statusListener(); // Clear old listener
+            
+            statusListener = onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    
+                    // 1. Handle Suspend (Diskualifikasi)
+                    if (data.status === 'suspended') {
+                        // Stop timers & listeners
+                        clearInterval(timerInterval);
+                        clearInterval(heartbeatInterval);
+                        statusListener(); 
+                        
+                        alert("MAAF, UJIAN ANDA DIHENTIKAN OLEH PENGAWAS (DISKUALIFIKASI).");
+                        location.reload(); // Kick out to login
+                    }
+                    
+                    // 2. Handle Force Finish (Paksa Selesai)
+                    // Pastikan kita tidak sedang dalam proses submit sendiri (loop prevention)
+                    else if (data.status === 'selesai' && !isSubmitting) {
+                         // Stop timers & listeners
+                        clearInterval(timerInterval);
+                        clearInterval(heartbeatInterval);
+                        statusListener();
+                        
+                        alert("Waktu ujian telah dihentikan oleh Pengawas.");
+                        finishExam(); // Force local submit logic to show results
+                    }
+                }
+            });
+        }
+
+        function startHeartbeat(docRef) {
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            
+            // Kirim sinyal setiap 30 detik
+            heartbeatInterval = setInterval(async () => {
+                if (!isSubmitting) {
+                    try {
+                        // HANYA update timestamp, JANGAN sentuh status
+                        // Ini mencegah konflik jika guru mengubah status jadi 'suspended'
+                        await updateDoc(docRef, {
+                            lastHeartbeat: serverTimestamp()
+                        });
+                    } catch (e) {
+                        console.error("Heartbeat fail", e);
+                    }
+                }
+            }, 30000); // 30 Detik
+        }
 
         const compressImage = (base64Str) => {
             return new Promise((resolve) => {
@@ -992,7 +1016,12 @@
         };
 
         window.finishExam = async () => {
-            clearInterval(timerInterval); isSubmitting = true; showLoading(true);
+            clearInterval(timerInterval); 
+            clearInterval(heartbeatInterval); // Stop heartbeat
+            if(statusListener) statusListener(); // Stop listener
+            
+            isSubmitting = true; 
+            showLoading(true);
             try { if(document.fullscreenElement) await document.exitFullscreen().catch(e=>{}); } catch(e){}
 
             const finalDetails = questions.map((q, i) => ({ id: q.id, answer: answers[i] }));
